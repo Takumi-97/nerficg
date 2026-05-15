@@ -77,7 +77,28 @@ def load_base_config(scene: str) -> dict:
         return yaml.safe_load(f)
 
 
-def run_experiment(scene: str, method: str) -> bool:
+def find_completed_run(scene: str, method: str) -> Path | None:
+    """final.pt が存在する最新の出力ディレクトリを返す。なければ None。"""
+    output_root = Path('output/SPaGS')
+    prefix = f'{scene}_{method}_'
+    candidates = sorted(output_root.glob(f'{prefix}*'), reverse=True)
+    for d in candidates:
+        if (d / 'checkpoints' / 'final.pt').exists():
+            return d
+    return None
+
+
+def run_experiment(scene: str, method: str, skip_completed: bool = True) -> bool:
+    if skip_completed:
+        completed = find_completed_run(scene, method)
+        if completed:
+            print(f'\n{"="*60}')
+            print(f'  Scene : {scene}')
+            print(f'  Method: {method}')
+            print(f'  SKIP  : already completed → {completed.name}')
+            print(f'{"="*60}')
+            return True
+
     config = load_base_config(scene)
 
     # wandb有効化

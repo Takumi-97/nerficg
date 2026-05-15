@@ -532,15 +532,22 @@ class SPaGSTrainer(GuiTrainer):
         import time, wandb
         elapsed = time.time() - getattr(self, '_training_start_time', time.time())
         n_final = self.model.gaussians.get_positions.shape[0]
+
+        # モデルサイズ（Gaussianパラメータのメモリ量）
+        size_bytes = sum(p.numel() * p.element_size() for p in self.model.gaussians.parameters())
+        size_mb = size_bytes / 1024 / 1024
+
         wandb.log({
             'final/n_gaussians':        n_final,
+            'final/model_size_mb':      size_mb,
             'final/training_time_min':  elapsed / 60.0,
             'final/training_time_sec':  elapsed,
         })
         wandb.run.summary['final_n_gaussians']       = n_final
+        wandb.run.summary['final_model_size_mb']     = size_mb
         wandb.run.summary['total_training_time_min'] = elapsed / 60.0
         wandb.run.summary['experiment_tag']          = self.EXPERIMENT_TAG
-        Logger.logInfo(f'[wandb] Final stats logged: {n_final:,} Gaussians, {elapsed/60:.1f} min')
+        Logger.logInfo(f'[wandb] Final stats logged: {n_final:,} Gaussians, {size_mb:.1f} MB, {elapsed/60:.1f} min')
     
     #ここ追加
     @trainingCallback(
