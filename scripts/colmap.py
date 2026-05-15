@@ -87,7 +87,7 @@ def main(*, base_path: Path, use_cpu: bool, camera_mode: str, vocab_tree_matcher
     command: list[str] = [
         'colmap', 'exhaustive_matcher' if not vocab_tree_matcher else 'vocab_tree_matcher',
         '--database_path', str(base_path / 'database.db'),
-        '--SiftMatching.use_gpu', str(not use_cpu),
+         '--SiftMatching.use_gpu', str(not use_cpu),
     ]
     if vocab_tree_matcher:
         command.append('--VocabTreeMatching.vocab_tree_path')

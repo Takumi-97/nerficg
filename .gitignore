@@ -21,3 +21,23 @@ backup/
 .pytest_cache/
 imgui.ini
 __pycache__/
+
+# Large binary / data files
+*.ply
+*.run
+*.csv
+
+# Experiment outputs
+output/
+iter_pointcloud/
+experiment_results/
+tutorial_out_360/
+render_checks/
+
+# Manual backup files (use git branches instead)
+*保存用*
+*触った*
+*うまくいってない*
+
+# Zone identifier files (Windows/WSL artifact)
+*:Zone.Identifier
