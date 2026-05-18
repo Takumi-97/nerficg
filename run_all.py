@@ -72,6 +72,14 @@ RUN_SCENES  = [
 ]
 RUN_METHODS = ['baseline', 'opacity', 'proposed']
 
+# 設定変更後に強制再実行が必要な (scene, method) ペア
+# skip_completed=True でもこのリストにあれば再実行する
+FORCE_RERUN = [
+    ('barbershop',    'proposed'),  # 旧設定(volume+error weight)で完了済み → 再実行
+    ('archiviz-flat', 'proposed'),  # 同上
+    ('bistro_bike',   'proposed'),  # 同上
+]
+
 
 def load_base_config(scene: str) -> dict:
     config_path = Path(f'configs/{scene}.yaml')
@@ -143,24 +151,28 @@ def run_experiment(scene: str, method: str, skip_completed: bool = True) -> bool
 
 
 def main():
-    total   = len(RUN_SCENES) * len(RUN_METHODS)
+    # 通常実行 + 強制再実行リストを結合してキューを作成
+    queue = [(s, m, True) for s in RUN_SCENES for m in RUN_METHODS]
+    queue += [(s, m, False) for s, m in FORCE_RERUN]
+
+    total   = len(queue)
     done    = 0
     failed  = []
     t_start = time.time()
 
-    print(f'OmniPrune: {total} experiments ({len(RUN_SCENES)} scenes × {len(RUN_METHODS)} methods)')
+    print(f'OmniPrune: {total} experiments ({len(RUN_SCENES)} scenes × {len(RUN_METHODS)} methods'
+          f' + {len(FORCE_RERUN)} force-rerun)')
     print(f'wandb project: {WANDB_PROJECT} / entity: {WANDB_ENTITY}\n')
 
-    for scene in RUN_SCENES:
-        for method in RUN_METHODS:
-            success = run_experiment(scene, method)
-            done += 1
-            if not success:
-                failed.append(f'{scene}/{method}')
-            elapsed_total = (time.time() - t_start) / 60
-            remaining = total - done
-            eta = (elapsed_total / done * remaining) if done > 0 else 0
-            print(f'  Progress: {done}/{total} | Elapsed: {elapsed_total:.0f} min | ETA: {eta:.0f} min')
+    for scene, method, skip in queue:
+        success = run_experiment(scene, method, skip_completed=skip)
+        done += 1
+        if not success:
+            failed.append(f'{scene}/{method}')
+        elapsed_total = (time.time() - t_start) / 60
+        remaining = total - done
+        eta = (elapsed_total / done * remaining) if done > 0 else 0
+        print(f'  Progress: {done}/{total} | Elapsed: {elapsed_total:.0f} min | ETA: {eta:.0f} min')
 
     print(f'\n{"="*60}')
     print(f'All done. {done - len(failed)}/{total} succeeded.')
