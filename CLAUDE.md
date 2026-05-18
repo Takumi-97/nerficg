@@ -19,7 +19,7 @@ src/Methods/SPaGS/
 ### 提案手法：Contribution-based Pruning
 - `computeSphericalContributionScores()` (Renderer.py): 各Gaussianの貢献スコアを複数フレームから計算
   - 体積項 γ(Σ) = V_norm^β（小Gaussianの過剰ペナルティ防止）
-  - 仰角補正 f(θ) = cos(θ)（極の距離バイアス除去）
+  - 仰角補正 f(θ) = cos(θ)（equirectangularのピクセル過密による**スコアバイアス**の除去）
   - HFフレームブースト（GTグラジェントでフレーム重み付け）
   - エラー重み（高誤差領域のGaussianを削減）
 
@@ -56,6 +56,9 @@ Iter 30000:    学習終了
 `EXPERIMENT_TAG`で実験を区別（"proposed" / "baseline" / "opacity" など）
 
 ## 注意点
-- equirectangular前提：極付近はピクセルが過密で距離バイアスが生じる
+- equirectangular前提：極付近はピクセルが過密で**スコアバイアス**が生じる
+  - 検証済み（iter_pointcloud/の緯度分布解析）：Gaussian自体は極に過密にはなっていない（極：0.6%、一様球面期待値：3.4%）
+  - むしろ室内シーンでは赤道付近（視線高さ）にGaussianが集中する（-30°〜+15°で約57%）
+  - 問題は「Gaussianの過密」ではなく「極付近Gaussianのスコアが過大評価される」こと
 - 遠景のHF判定は遠景内ローカルパーセンタイルで行う（グローバル閾値だと全てLF扱い）
 - densification中にプルーニングした場合は`reset_densification_info()`が必要（shape mismatch防止）

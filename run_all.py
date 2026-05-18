@@ -20,6 +20,7 @@ SCENES = [
     'pavilion_midday_chair',
     'pavilion_midday_pond',
     'restroom',
+    'LOU',
 ]
 
 METHODS = {
@@ -67,6 +68,7 @@ RUN_SCENES  = [
     'pavilion_midday_chair',
     'pavilion_midday_pond',
     'restroom',
+    'LOU',
 ]
 RUN_METHODS = ['baseline', 'opacity', 'proposed']
 
