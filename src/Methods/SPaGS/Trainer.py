@@ -56,7 +56,7 @@ from Optim.Samplers.DatasetSamplers import DatasetSampler
     USE_HF_DENSIFICATION=False,
     HF_DENSIFICATION_KAPPA=0.3,      # 高周波領域の閾値低減率（0.3 = 70%下げる）
     HF_DENSIFICATION_PERCENTILE=0.8, # 上位20%を高周波領域と判定
-    USE_LAT_DENSIFY_CORRECTION=True, # Densification勾配の緯度補正（極の過剰densifyを抑制）
+    USE_LAT_DENSIFY_CORRECTION=False, # Densification勾配の緯度補正（極の過剰densifyを抑制）
     CONTRIBUTION_PRUNING_USE_VOLUME=True,
     CONTRIBUTION_PRUNING_USE_SPHERICAL=True,
     CONTRIBUTION_PRUNING_USE_DISTANCE=False,  # g(d)距離補正
@@ -84,7 +84,7 @@ from Optim.Samplers.DatasetSamplers import DatasetSampler
     PRUNING_LR_RESET_FACTOR=0.30,  # position LR を init * factor にリセット
     PRUNING_LR_RESET_STEPS=2000,   # reset_lr → scheduled_lr への移行iter数
     # Solid-Angle-Aware opacity pruning during densification
-    SA_OPACITY_PRUNING=True,       # True: 極/遠景ほど高い不透明度閾値でプルーニング
+    SA_OPACITY_PRUNING=False,      # True: 極/遠景ほど高い不透明度閾値でプルーニング
     SA_OPACITY_MIN_WEIGHT=0.10,    # cos(θ)の最小値（これ以下にはクランプ）
     # 実験管理
     EXPERIMENT_TAG="proposed",     # "baseline" | "opacity" | "proposed"

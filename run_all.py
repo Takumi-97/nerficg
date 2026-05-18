@@ -43,14 +43,14 @@ METHODS = {
         'EXPERIMENT_TAG':           'opacity',
     },
     'proposed': {
-        'USE_CONTRIBUTION_PRUNING': True,
-        'USE_OPACITY_BASELINE':     False,
-        'USE_OPACITY_SCORE':        False,
-        'USE_UNIFORM_CONTRIBUTION': False,
-        'USE_REGION_NORMALIZED':    True,
-        'USE_ERROR_WEIGHT':         True,
-        'ERROR_WEIGHT_LAMBDA':      2.0,
-        'EXPERIMENT_TAG':           'proposed',
+        'USE_CONTRIBUTION_PRUNING':       True,
+        'USE_OPACITY_BASELINE':           False,
+        'USE_OPACITY_SCORE':              False,
+        'USE_UNIFORM_CONTRIBUTION':       False,
+        'USE_REGION_NORMALIZED':          True,
+        'CONTRIBUTION_PRUNING_USE_VOLUME': False,  # 体積項なし（仰角補正のみ）
+        'USE_ERROR_WEIGHT':               False,   # エラー重みなし
+        'EXPERIMENT_TAG':                 'proposed',
     },
 }
 
