@@ -405,11 +405,15 @@ class Gaussians(torch.nn.Module):
         prune_mask = self.split(grads, grad_threshold, grads_abs, grad_abs_threshold)
 
         if sa_opacity_pruning:
+            # SA（Solid-Angle）補正 opacity プルーニング。
+            # 極付近の Gaussian は多くのピクセルに投影されるため opacity が高くなりやすい。
+            # cos(θ) で割ることで「極ほど厳しい opacity 閾値」を適用し、
+            # densification で過剰に生成される極 Gaussian を抑制する。
             pos = self.get_positions.detach()
             dist_xz = torch.norm(pos[:, [0, 2]], dim=1).clamp(min=1e-6)
             theta = torch.atan2(pos[:, 1], dist_xz)
             solid_w = torch.cos(theta).clamp(min=sa_min_weight)
-            sa_threshold = min_opacity / solid_w
+            sa_threshold = min_opacity / solid_w  # 極(cos→0)ほど threshold が大きくなる
             prune_mask |= self.get_opacities.flatten() < sa_threshold
         else:
             prune_mask |= self.get_opacities.flatten() < min_opacity
@@ -630,8 +634,9 @@ class Gaussians(torch.nn.Module):
         """Uniformly prune by given scores: keep top keep_ratio fraction globally."""
         n_before = scores.shape[0]
         n_keep = max(1, int(n_before * keep_ratio))
-        threshold = torch.topk(scores, n_keep, largest=True).values[-1]
-        prune_mask = scores < threshold
+        sorted_indices = torch.argsort(scores, descending=True)
+        prune_mask = torch.ones(n_before, dtype=torch.bool, device=scores.device)
+        prune_mask[sorted_indices[:n_keep]] = False
         self.prune_points(prune_mask)
         if self.use_3d_filter:
             self.filter_3D = self.filter_3D[~prune_mask].contiguous()
@@ -647,11 +652,18 @@ class Gaussians(torch.nn.Module):
         polar_threshold_deg: float = 45.0,
         far_percentile: float = 0.70,
     ) -> None:
-        """360°固有のbias補正プルーニング。
+        """360°固有のバイアスを補正した貢献スコアプルーニング。
 
-        遠景Gaussianは絶対的な貢献スコアが低くなる距離バイアスがある。
-        各region（近景赤道/近景極/遠景）内でスコアをz-score正規化してから
-        グローバルtop-Kプルーニングを行うことで、このbias を除去する。
+        問題：遠景 Gaussian はカメラから遠いためブレンド重みが小さく、
+              同等の重要度でも近景より絶対スコアが低くなる「距離バイアス」がある。
+              グローバルな閾値を使うと遠景が過剰に削除される。
+
+        解決：3つの region（近景赤道 / 近景極 / 遠景）内でそれぞれ z-score 正規化し、
+              「その region の中での相対的な重要度」に変換してからグローバル top-K を行う。
+              これにより各 region からバランスよく Gaussian が保持される。
+
+        注意：top-K を threshold 比較で行うと、スコア=0 の大量 Gaussian で tie が発生し
+              意図した keep 数を超える場合がある。argsort で厳密に n_keep 個を選ぶ。
         """
         import math
         pos = self._positions.detach()  # [N, 3]
@@ -685,10 +697,13 @@ class Gaussians(torch.nn.Module):
             normalized_scores[mask] = (s - mean) / std
             Logger.logInfo(f'    {label}: n={n_region:,}, score mean={mean:.4f}, std={std:.4f}')
 
-        # グローバルtop-K（正規化スコアで）
+        # グローバルtop-K（正規化スコアで厳密にn_keep個を保持）
+        # threshold比較だとスコアが0の大量Gaussianでtieが発生し保持数が過多になるため
+        # argsortで順位付けして確実にn_keep個を選ぶ
         n_keep = max(1, int(n_before * keep_ratio))
-        threshold = torch.topk(normalized_scores, n_keep, largest=True).values[-1]
-        prune_mask = normalized_scores < threshold
+        sorted_indices = torch.argsort(normalized_scores, descending=True)
+        prune_mask = torch.ones(n_before, dtype=torch.bool, device=normalized_scores.device)
+        prune_mask[sorted_indices[:n_keep]] = False
 
         self.prune_points(prune_mask)
         if self.use_3d_filter:

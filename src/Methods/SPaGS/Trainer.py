@@ -36,58 +36,63 @@ from Optim.Samplers.DatasetSamplers import DatasetSampler
     USE_DISTANCE_SCALING=True,
     OPACITY_RESET_INTERVAL=3_000,
     OPACITY_THRESHOLD=0.005,
-    DENSIFY_START_ITERATION=200,  # 500
-    DENSIFY_END_ITERATION=15_000,
+    DENSIFY_START_ITERATION=200,   # 原著SPaGSは500。200の方がGaussian数が多くなりやすい
+    DENSIFY_END_ITERATION=15_000,  # densification終了後にcontribution pruningを行う設計
     DENSIFICATION_INTERVAL=100,
-    DENSIFY_GRAD_THRESHOLD=0.00005,  # 0.0002
-    USE_WS_LOSS=True,  # True: 緯度重み付きL1（WS-PSNR最適化）/ False: 標準L1（PSNR最適化）
+    DENSIFY_GRAD_THRESHOLD=0.00005,  # 原著SPaGSは0.0002。小さいほど densify しやすく Gaussian 数が増える
+    USE_WS_LOSS=True,  # True: sin(π·i/H)重み付きL1でWS-PSNRを直接最適化 / False: 均等L1でPSNR最適化
     LOSS=Framework.ConfigParameterList(
         LAMBDA_L1=0.8,
         LAMBDA_DSSIM=0.2,
     ),
-    ##ここ追加
-    USE_CONTRIBUTION_PRUNING=True,          # True: 提案手法有効
-    CONTRIBUTION_PRUNING_KEEP_RATIO=0.632,     # 残す割合（0.5 = 50%残す）
-    CONTRIBUTION_PRUNING_SAMPLE_FRAMES=200,  # スコア蓄積フレーム数
-    CONTRIBUTION_PRUNING_ITERATIONS=[16000, 20000],
-    CONTRIBUTION_PRUNING_BETA=0.5,           # γ(Σ)=V_norm^β の β。0で体積無視、1で線形
-    CONTRIBUTION_PRUNING_VOLUME_GAMMA_MIN=0.50,  # 体積項の下限。小Gaussian（高周波成分）の過剰ペナルティを防ぐ
-    CONTRIBUTION_PRUNING_HF_FRAME_BOOST=0.0,     # GTグラジェント強度によるHFフレーム重み付け強度（0で無効）
+    # ── 提案手法：貢献スコアベースプルーニング ──────────────────────────
+    USE_CONTRIBUTION_PRUNING=True,
+    CONTRIBUTION_PRUNING_KEEP_RATIO=0.632,      # 1ラウンドで残す割合。2ラウンド後の実効保持率 ≈ 0.632^2 ≈ 40%
+    CONTRIBUTION_PRUNING_SAMPLE_FRAMES=200,     # スコア計算に使うフレーム数。多いほど安定するが計算コスト増
+    CONTRIBUTION_PRUNING_ITERATIONS=[16000, 20000],  # densification終了(15000)直後・学習終了前の2回
+    CONTRIBUTION_PRUNING_BETA=0.5,              # 体積項 γ=V_norm^β の指数。0→体積無視、1→線形ペナルティ
+    CONTRIBUTION_PRUNING_VOLUME_GAMMA_MIN=0.50, # 体積項の下限。高周波テクスチャを担う小Gaussianの過剰ペナルティを防ぐ
+    CONTRIBUTION_PRUNING_HF_FRAME_BOOST=0.0,    # HFフレーム重み付けの強度（0で無効 = 単純フレーム平均）
     USE_HF_DENSIFICATION=False,
     HF_DENSIFICATION_KAPPA=0.3,      # 高周波領域の閾値低減率（0.3 = 70%下げる）
     HF_DENSIFICATION_PERCENTILE=0.8, # 上位20%を高周波領域と判定
     USE_LAT_DENSIFY_CORRECTION=False, # Densification勾配の緯度補正（極の過剰densifyを抑制）
     CONTRIBUTION_PRUNING_USE_VOLUME=True,
-    CONTRIBUTION_PRUNING_USE_SPHERICAL=True,
-    CONTRIBUTION_PRUNING_USE_DISTANCE=False,  # g(d)距離補正
-    CONTRIBUTION_PRUNING_DISTANCE_LAMBDA=1.0, # λ：大きいほど遠景を積極的に削減
-    USE_PIXEL_GRAD_HF=False,  # 遠景のHF判定にGTグラジェント投影（無効：スケールベースの方が精度高い）
-    USE_ERROR_WEIGHT=True,    # True: エラー重み付きスコア（高誤差領域のGaussianを優先削除）
-    ERROR_WEIGHT_LAMBDA=2.0,  # exp(-λ * error_norm) の λ：大きいほどエラー領域を積極的に削除
-    USE_OPACITY_BASELINE=False,  # True: opacityベース一様プルーニング（比較ベースライン用）
-    OPACITY_BASELINE_KEEP_RATIO=0.690,  # 提案手法の実効保持率に合わせた値（~69%/round）
-    USE_OPACITY_SCORE=False,     # True: opacityをスコアとしてregion-aware pruningに使用（ハイブリッド）
-    USE_UNIFORM_CONTRIBUTION=False,  # True: contribution scoreで一様グローバルプルーニング（アブレーション用）
-    CONTRIBUTION_UNIFORM_KEEP_RATIO=0.690,  # 一様プルーニングの保持率
-    USE_REGION_NORMALIZED=True,     # True: region内z-score正規化→グローバルtop-K（距離biasを除去）
-    REGION_NORMALIZED_KEEP_RATIO=0.690,     # region正規化プルーニングの保持率
-    # 3領域別プルーニング
-    PRUNING_POLAR_THRESHOLD_DEG=45.0,  # 極判定の仰角閾値[度]
-    PRUNING_FAR_PERCENTILE=0.70,       # 遠景判定の距離パーセンタイル
-    PRUNING_KEEP_NEAR_EQ=0.85,         # 近景赤道の保持率（高め）
-    PRUNING_KEEP_NEAR_POLAR=0.60,      # 近景極の保持率（360°シーンでは天井/床付近も重要）
-    PRUNING_KEEP_FAR=0.60,             # 遠景の保持率（360°室内では壁/天井/床=遠景なので保護）
-    # HF保護：小さいGaussian（高周波成分）を優先的に残す
-    PRUNING_HF_SCALE_PERCENTILE=0.50,  # max scaleの下位50%をHFと判定（より広くHF保護）
-    PRUNING_HF_KEEP_BOOST=0.20,        # HFのkeep_ratioにこれだけ上乗せ（高周波品質を重視）
-    # Pruning後のposition LRリセット
-    PRUNING_LR_RESET_FACTOR=0.30,  # position LR を init * factor にリセット
-    PRUNING_LR_RESET_STEPS=2000,   # reset_lr → scheduled_lr への移行iter数
-    # Solid-Angle-Aware opacity pruning during densification
-    SA_OPACITY_PRUNING=False,      # True: 極/遠景ほど高い不透明度閾値でプルーニング
-    SA_OPACITY_MIN_WEIGHT=0.10,    # cos(θ)の最小値（これ以下にはクランプ）
-    # 実験管理
-    EXPERIMENT_TAG="proposed",     # "baseline" | "opacity" | "proposed"
+    CONTRIBUTION_PRUNING_USE_SPHERICAL=True,        # cos(θ)によるグローバル仰角補正（ワールド座標基準）
+    CONTRIBUTION_PRUNING_USE_CAM_SPHERICAL=False,   # cos(θ)をフレームごとのカメラ相対方向で計算（ablation用）
+    CONTRIBUTION_PRUNING_USE_DISTANCE=False,        # 遠景ペナルティ。region_normalized で対処するため通常は無効
+    CONTRIBUTION_PRUNING_DISTANCE_LAMBDA=1.0,
+    USE_PIXEL_GRAD_HF=False,    # 遠景HF判定をGTグラジェント投影で行う（スケールベースより不安定なので無効）
+    USE_ERROR_WEIGHT=True,      # 高誤差領域の Gaussian を低スコアにしてプルーニング優先度を上げる
+    ERROR_WEIGHT_LAMBDA=2.0,    # exp(-λ·error_norm) の強度。大きいほどエラー領域を積極的に削除
+    # ── プルーニング戦略の切り替え（どれか1つ有効にする）───────────────
+    USE_OPACITY_BASELINE=False,      # ベースライン比較用: opacity 閾値による一様プルーニング
+    OPACITY_BASELINE_KEEP_RATIO=0.690,
+    USE_OPACITY_SCORE=False,         # ハイブリッド: opacity をスコアとして region-aware に使う（研究用）
+    USE_UNIFORM_CONTRIBUTION=False,  # アブレーション: cos補正スコアで region を無視してグローバルtop-K
+    CONTRIBUTION_UNIFORM_KEEP_RATIO=0.690,
+    USE_REGION_NORMALIZED=True,      # 提案手法: region 内 z-score 正規化 → グローバル top-K（距離バイアス補正）
+    REGION_NORMALIZED_KEEP_RATIO=0.690,
+    # ── region_aware_pruning のパラメータ（USE_REGION_NORMALIZED=False 時に使用）──
+    PRUNING_POLAR_THRESHOLD_DEG=45.0,
+    PRUNING_FAR_PERCENTILE=0.70,
+    PRUNING_KEEP_NEAR_EQ=0.85,
+    PRUNING_KEEP_NEAR_POLAR=0.60,
+    PRUNING_KEEP_FAR=0.60,
+    PRUNING_HF_SCALE_PERCENTILE=0.50,
+    PRUNING_HF_KEEP_BOOST=0.20,
+    # ── プルーニング後の position LR リセット ─────────────────────────
+    # プルーニングで Gaussian が消えると残った Gaussian の勾配統計が乱れるため、
+    # position LR を一時的に大きくしてから減衰させ、再収束を促す。
+    PRUNING_LR_RESET_FACTOR=0.30,  # リセット直後の LR = init_lr × factor
+    PRUNING_LR_RESET_STEPS=2000,   # この iter 数かけてスケジュール LR に戻す
+    # ── SA（Solid-Angle）-Aware opacity pruning ────────────────────────
+    # densification 中の opacity プルーニングに仰角補正を加える。
+    # 極付近は opacity が高くなりやすいため、cos(θ) で割って threshold を厳しくする。
+    SA_OPACITY_PRUNING=False,
+    SA_OPACITY_MIN_WEIGHT=0.10,    # cos(θ) の最小クランプ値（ゼロ除算防止）
+    # ── 実験管理 ────────────────────────────────────────────────────
+    EXPERIMENT_TAG="proposed",     # wandb / output フォルダ名の識別子
 )
 class SPaGSTrainer(GuiTrainer):
     """Defines the trainer for the SPaGS method."""
@@ -516,6 +521,16 @@ class SPaGSTrainer(GuiTrainer):
         # default logging
         super().logWandB(iteration, dataset)
 
+    @trainingCallback(active='WANDB.ACTIVATE', priority=1, iteration_stride='WANDB.INTERVAL')
+    def commitWandB(self, iteration: int, dataset: 'BaseDataset') -> None:
+        """Base の commitWandB をオーバーライドし、explicit step を渡す。
+
+        Base の実装は step を省略するため、auto-step タイムラインと explicit-step
+        タイムラインが混在し、iter 15000 以降のデータが WandB チャートに表示されない
+        問題が発生する。step=iteration を明示することで両者を統一する。
+        """
+        Framework.wandb.log(data={}, commit=True, step=iteration)
+
     @postTrainingCallback(priority=1000)
     @torch.no_grad()
     def bakeActivations(self, *_) -> None:
@@ -558,11 +573,27 @@ class SPaGSTrainer(GuiTrainer):
     )
     @torch.no_grad()
     def contributionBasedPruning(self, iteration: int, dataset: 'BaseDataset') -> None:
-        """球面Contribution-based Pruning（立体角補正あり）。"""
+        """球面 Contribution-based Pruning（立体角補正あり）。
+
+        タイミングの設計意図：
+          iter 16000: densification 終了(15000)直後。Gaussian 数がピークに達した状態で
+                      1回目のプルーニングを行い、不要 Gaussian を大量に除去する。
+          iter 20000: 1回目プルーニング後に再収束した状態で2回目を行い、
+                      精度を維持しながらさらに圧縮する。
+          iter 30000: 学習終了（プルーニングなし）。
+        """
         if iteration not in self.CONTRIBUTION_PRUNING_ITERATIONS:
             return
 
         n_before = self.model.gaussians.get_positions.shape[0]
+
+        # 最初のプルーニング直前の位置を保存（緯度分布の before/after 比較用）
+        if iteration == self.CONTRIBUTION_PRUNING_ITERATIONS[0]:
+            import numpy as np
+            pos_np = self.model.gaussians.get_positions.detach().cpu().numpy()
+            save_path = str(self.output_directory / f'positions_pre_pruning_{iteration}.npy')
+            np.save(save_path, pos_np)
+            Logger.logInfo(f'  [SAVE] Pre-pruning positions → {save_path} (N={len(pos_np):,})')
 
         # ── ベースライン: opacityベース一様プルーニング ──
         if self.USE_OPACITY_BASELINE:
@@ -623,6 +654,7 @@ class SPaGSTrainer(GuiTrainer):
             hf_frame_boost=self.CONTRIBUTION_PRUNING_HF_FRAME_BOOST,
             use_volume=self.CONTRIBUTION_PRUNING_USE_VOLUME,
             use_spherical=self.CONTRIBUTION_PRUNING_USE_SPHERICAL,
+            use_cam_spherical=self.CONTRIBUTION_PRUNING_USE_CAM_SPHERICAL,
             use_distance=self.CONTRIBUTION_PRUNING_USE_DISTANCE,
             distance_lambda=self.CONTRIBUTION_PRUNING_DISTANCE_LAMBDA,
             compute_pixel_grad=self.USE_PIXEL_GRAD_HF,

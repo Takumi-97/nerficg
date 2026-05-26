@@ -1,6 +1,17 @@
 # -- coding: utf-8 --
 
-"""SPaGS/Renderer.py: """
+"""SPaGS/Renderer.py: SPaGS用レンダラ。
+
+通常レンダリングに加え、360°シーン向けの Contribution score 計算を担う。
+Contribution score は equirectangular の「極ピクセル過密バイアス」を補正した上で
+各Gaussianの重要度を評価し、プルーニングの基準として使う。
+
+極ピクセル過密バイアスとは：
+  equirectangular では (x, y) ピクセルが球面上の等面積に対応しない。
+  極付近では 1/cos(θ) 倍の密度でピクセルが並ぶため、
+  同じ Gaussian でも極に位置するほど多くのピクセルに影響を与えてしまう。
+  これを補正しないと「極の Gaussian ほど重要」という誤ったスコアになる。
+"""
 
 import torch
 
@@ -296,6 +307,7 @@ class SPaGSRenderer(BaseRenderer):
             hf_frame_boost: float = 5.0,
             use_volume: bool = True,
             use_spherical: bool = True,
+            use_cam_spherical: bool = False,
             use_distance: bool = False,
             distance_lambda: float = 1.0,
             compute_pixel_grad: bool = False,
@@ -333,7 +345,9 @@ class SPaGSRenderer(BaseRenderer):
             ).detach()
             rotations = self.model.gaussians.get_rotations.detach()
 
-            # ── 1. 体積項 γ(Σ) ──
+            # ── 1. 体積項 γ(Σ) = clamp(V_norm^β, min=gamma_min) ──
+            # 小さいGaussianほどスコアが低くなるが、高周波テクスチャを担う小Gaussianを
+            # 過剰にペナルティしないよう gamma_min で下限を設ける。
             if use_volume:
                 volume  = scales[:, 0] * scales[:, 1] * scales[:, 2]
                 v_max90 = torch.quantile(volume, 0.90).clamp(min=1e-9)
@@ -343,14 +357,19 @@ class SPaGSRenderer(BaseRenderer):
                 gamma = torch.ones(n_gaussians, device=positions.device)
 
             # ── 2. 仰角補正 f(θ) = cos(θ) ──
-            if use_spherical:
+            # equirectangular の極ピクセル過密バイアスを除去する。
+            # 極付近は 1/cos(θ) 倍のピクセルが投影されるため、放置するとスコアが過大評価される。
+            # use_cam_spherical=True の場合はフレームごとにカメラ相対方向で計算するのでここでは1。
+            if use_spherical and not use_cam_spherical:
                 dist_xz     = torch.norm(positions[:, [0, 2]], dim=1).clamp(min=1e-6)
                 theta       = torch.atan2(positions[:, 1], dist_xz)   # [-π/2, π/2]
-                solid_angle = torch.cos(theta).clamp(min=0.1)         # 極で0.1下限
+                solid_angle = torch.cos(theta).clamp(min=0.1)         # 0.1下限：極でゼロ除算を防ぐ
             else:
                 solid_angle = torch.ones(n_gaussians, device=positions.device)
 
             # ── 3. 距離補正 g(d) = exp(-λ · d_norm) ──
+            # 遠景Gaussianを積極的に削減したいときに使う。通常は無効。
+            # 遠景バイアスは region_normalized_pruning でも補正するため重複に注意。
             if use_distance:
                 scene_center = positions.mean(dim=0)
                 dist         = torch.norm(positions - scene_center, dim=1)
@@ -361,9 +380,10 @@ class SPaGSRenderer(BaseRenderer):
                 dist_weight = torch.ones(n_gaussians, device=positions.device)
 
             # ── 4. HFフレーム重み付き平均ブレンド重み ──
-            # フレームごとのGTグラジエント強度でフレームを重み付けして累積する。
-            # テクスチャ・エッジが多いフレーム（高周波）ほど重みを大きくすることで、
-            # 高周波成分を担うGaussianのスコアが不当に低くなるバイアスを補正する。
+            # rasterizer.update_max_weights でフレームごとのブレンド重みを取得し累積する。
+            # GTグラジェントが大きいフレーム（テクスチャ・エッジが豊富）ほど重みを大きくすることで、
+            # 「高周波フレームに寄与する Gaussian を高く評価する」バイアスを加える。
+            # hf_frame_boost=0 にすると単純なフレーム平均（重み付けなし）と等価になる。
             all_camera_props = list(dataset.data[dataset.mode])
             sampled = random.sample(all_camera_props, min(n_sample_frames, len(all_camera_props)))
 
@@ -393,6 +413,23 @@ class SPaGSRenderer(BaseRenderer):
                     scale_modifier=1.0,
                     weight_threshold=0.01,
                 )
+                # ── カメラ相対仰角補正（use_cam_spherical=True 時）──
+                # 各フレームのカメラ位置からGaussianへの方向ベクトルで仰角を計算し、
+                # cos(θ_cam) をフレームごとのブレンド重みに乗じる。
+                # ワールド座標仰角（use_spherical）との違い：カメラが原点以外にある場合、
+                # Gaussianの「見かけの仰角」はカメラ位置に依存して変わる。
+                if use_cam_spherical:
+                    T_cam = camera_properties.T
+                    if isinstance(T_cam, torch.Tensor):
+                        cam_pos_c = T_cam.float().to(positions.device)
+                    else:
+                        cam_pos_c = torch.tensor(T_cam, dtype=torch.float32, device=positions.device)
+                    dirs_c      = positions - cam_pos_c.unsqueeze(0)           # [N, 3]
+                    dist_xz_c   = torch.norm(dirs_c[:, [0, 2]], dim=1).clamp(min=1e-6)
+                    theta_c     = torch.atan2(dirs_c[:, 1], dist_xz_c)        # elevation [-π/2, π/2]
+                    cos_cam     = torch.cos(theta_c).clamp(min=0.1)           # [N]
+                    frame_weights = frame_weights * cos_cam
+
                 if hf_frame_boost > 0.0 and camera_properties.rgb is not None:
                     gt = camera_properties.rgb.detach().float()  # [3, H, W]
                     H, W = gt.shape[-2], gt.shape[-1]

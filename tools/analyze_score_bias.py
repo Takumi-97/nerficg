@@ -21,17 +21,41 @@ OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 LAT_BINS = np.linspace(-90, 90, 37)       # 5°刻み
 LAT_CENTERS = 0.5 * (LAT_BINS[:-1] + LAT_BINS[1:])
 
-# 解析対象シーン（完了済みのみ）
+# 解析対象シーン（v2実験、完了済みのみ）
 SCENES = {
     "barbershop": {
-        "baseline": "output/SPaGS/barbershop_baseline_2026-05-13-15-54-44",
-        "opacity":  "output/SPaGS/barbershop_opacity_2026-05-13-16-07-38",
-        "proposed": "output/SPaGS/barbershop_proposed_2026-05-13-16-20-42",
+        "baseline": "output/SPaGS/barbershop_v2_baseline_2026-05-22-12-52-20",
+        "opacity":  "output/SPaGS/barbershop_v2_opacity_2026-05-22-17-24-34",
+        "proposed": "output/SPaGS/barbershop_v2_proposed_2026-05-22-17-35-08",
     },
     "archiviz-flat": {
-        "baseline": "output/SPaGS/archiviz-flat_baseline_2026-05-13-16-32-13",
-        "opacity":  "output/SPaGS/archiviz-flat_opacity_2026-05-13-16-43-27",
-        "proposed": "output/SPaGS/archiviz-flat_proposed_2026-05-13-17-04-36",
+        "baseline": "output/SPaGS/archiviz-flat_v2_baseline_2026-05-22-13-46-12",
+        "opacity":  "output/SPaGS/archiviz-flat_v2_opacity_2026-05-26-10-42-22",
+        "proposed": "output/SPaGS/archiviz-flat_v2_proposed_2026-05-26-10-51-43",
+    },
+    "bistro_bike": {
+        "baseline": "output/SPaGS/bistro_bike_v2_baseline_2026-05-22-14-26-25",
+        "opacity":  "output/SPaGS/bistro_bike_v2_opacity_2026-05-22-18-03-06",
+        "proposed": "output/SPaGS/bistro_bike_v2_proposed_2026-05-22-18-15-51",
+    },
+    "bistro_square": {
+        "baseline": "output/SPaGS/bistro_square_v2_baseline_2026-05-22-18-41-30",
+        "opacity":  "output/SPaGS/bistro_square_v2_opacity_2026-05-22-18-55-10",
+        "proposed": "output/SPaGS/bistro_square_v2_proposed_2026-05-22-19-06-54",
+    },
+    "classroom": {
+        "baseline": "output/SPaGS/classroom_v2_baseline_2026-05-22-19-29-46",
+        "opacity":  "output/SPaGS/classroom_v2_opacity_2026-05-22-19-40-53",
+        "proposed": "output/SPaGS/classroom_v2_proposed_2026-05-22-19-51-37",
+    },
+    "fisher-hut": {
+        "baseline": "output/SPaGS/fisher-hut_v2_baseline_2026-05-22-20-09-24",
+        "opacity":  "output/SPaGS/fisher-hut_v2_opacity_2026-05-26-11-09-04",
+        "proposed": "output/SPaGS/fisher-hut_v2_proposed_2026-05-26-11-16-22",
+    },
+    "lone_monk": {
+        "baseline": "output/SPaGS/lone_monk_v2_baseline_2026-05-26-11-37-26",
+        # v2_opacity / v2_proposed は現在訓練中のためスキップ（final.ptなし時はload_gaussiansがNoneを返す）
     },
 }
 

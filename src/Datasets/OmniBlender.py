@@ -44,25 +44,88 @@ def rotmat2qvec(R):
     NEAR_PLANE=0.1,
     FAR_PLANE=1000.0,
     FOCAL_ANGLE=0.0,
+    USE_GT_POSES=True,
 )
 class CustomDataset(BaseDataset):
-    """Dataset class for iz_pano scenes."""
+    """Dataset class for OmniBlender scenes.
+
+    USE_GT_POSES=True (default): loads camera poses from transform.json (Blender ground-truth).
+    USE_GT_POSES=False: loads camera poses from openMVG/data_openmvg_{subset}.json (SfM reconstruction).
+    """
 
     def __init__(self, path: str) -> None:
+        # Coordinate systems are determined in load() based on USE_GT_POSES.
         super().__init__(
             path,
             EquirectangularCamera(0.1, 1000.0),
-            CameraCoordinateSystemsTransformations.LEFT_HAND,
-            WorldCoordinateSystemTransformations.XnZY,
+            None,
+            None,
         )
 
     def load(self) -> dict[str, list[CameraProperties] | None]:
         """Loads the dataset into a dict containing lists of CameraProperties for training and testing."""
-        # set near and far plane
         self.camera.near_plane = self.NEAR_PLANE
         self.camera.far_plane = self.FAR_PLANE
-        # load dataset
         dataset: dict[str, list[CameraProperties]] = {subset: [] for subset in self.subsets}
+
+        if self.USE_GT_POSES:
+            self._load_gt_poses(dataset)
+            self.camera_coordinate_system = CameraCoordinateSystemsTransformations.RIGHT_HAND
+            self.world_coordinate_system = WorldCoordinateSystemTransformations.XZY
+            # GT poses have no associated SfM point cloud → random initialization
+            self.point_cloud = None
+        else:
+            self._load_openmvg_poses(dataset)
+            self.camera_coordinate_system = CameraCoordinateSystemsTransformations.LEFT_HAND
+            self.world_coordinate_system = WorldCoordinateSystemTransformations.XnZY
+            ply_path = self.dataset_path / 'openMVG' / 'reconstruction' / 'colorized.ply'
+            if not os.path.exists(ply_path):
+                Framework.Logger.logWarning(f'SfM point cloud not found at "{ply_path}", using random initialization.')
+                self.point_cloud = None
+            else:
+                try:
+                    self.point_cloud = fetchPly(ply_path)
+                except Exception:
+                    raise Framework.DatasetError(f'Failed to load SfM point cloud')
+
+        return dataset
+
+    def _load_gt_poses(self, dataset: dict) -> None:
+        """Load camera poses from transform.json (Blender ground-truth c2w matrices)."""
+        transform_file = self.dataset_path / 'transform.json'
+        with open(transform_file) as f:
+            tf = json.load(f)
+        frames = tf['frames']
+        orig_width: int = tf['width']
+        orig_height: int = tf['height']
+        focal = orig_width / (2 * math.pi * math.cos(self.FOCAL_ANGLE / 180 * math.pi))
+
+        for subset in self.subsets:
+            if subset == 'val':
+                continue
+            split_file = self.dataset_path / f'{subset}.txt'
+            with open(split_file) as f:
+                indices = [int(line.strip()) for line in f if line.strip()]
+
+            image_filenames = [str(self.dataset_path / 'images' / frames[i]['file_path']) for i in indices]
+            rgbs, alphas = loadImagesParallel(image_filenames, self.IMAGE_SCALE_FACTOR, num_threads=-1, desc=subset)
+
+            for frame_idx, rgb, alpha in zip(indices, rgbs, alphas):
+                c2w = torch.as_tensor(frames[frame_idx]['transform_matrix'], dtype=torch.float32)
+                focal_x = focal * (rgb.shape[2] / orig_width)
+                focal_y = focal * (rgb.shape[1] / orig_height)
+                dataset[subset].append(CameraProperties(
+                    width=rgb.shape[2],
+                    height=rgb.shape[1],
+                    rgb=rgb,
+                    alpha=alpha,
+                    c2w=c2w,
+                    focal_x=focal_x,
+                    focal_y=focal_y,
+                ))
+
+    def _load_openmvg_poses(self, dataset: dict) -> None:
+        """Load camera poses from openMVG SfM reconstruction."""
         for subset in self.subsets:
             if subset == 'val':
                 continue
@@ -85,16 +148,11 @@ class CustomDataset(BaseDataset):
                 image_name = info["ptr_wrapper"]["data"]["filename"]
                 images.append(OpenMVGImage(name=image_name, c2w=c2w))
             images = natsorted(images, key=lambda data: data.name)
-            # load images
             image_filenames = [str(self.dataset_path / 'images' / image.name) for image in images]
-            # create camera properties
             rgbs, alphas = loadImagesParallel(image_filenames, self.IMAGE_SCALE_FACTOR, num_threads=-1, desc=subset)
-            for idx, (image, rgb, alpha) in enumerate(zip(images, rgbs, alphas)):
-                # intrinsics
+            for image, rgb, alpha in zip(images, rgbs, alphas):
                 focal_x = original_focal * (rgb.shape[2] / original_width)
                 focal_y = original_focal * (rgb.shape[1] / original_height)
-
-                # create camera properties and subsets
                 dataset[subset].append(CameraProperties(
                     width=rgb.shape[2],
                     height=rgb.shape[1],
@@ -104,17 +162,3 @@ class CustomDataset(BaseDataset):
                     focal_x=focal_x,
                     focal_y=focal_y,
                 ))
-
-        # load point cloud (optional: fall back to random init if ply not found)
-        ply_path = self.dataset_path / 'openMVG'/ 'reconstruction' / 'colorized.ply'
-        if not os.path.exists(ply_path):
-            Framework.Logger.logWarning(f'SfM point cloud not found at "{ply_path}", using random initialization.')
-            self.point_cloud = None
-        else:
-            try:
-                self.point_cloud = fetchPly(ply_path)
-            except Exception:
-                raise Framework.DatasetError(f'Failed to load SfM point cloud')
-
-        # return the dataset
-        return dataset
