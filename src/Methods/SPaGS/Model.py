@@ -615,6 +615,58 @@ class Gaussians(torch.nn.Module):
         n_after = self._positions.shape[0]
         Logger.logInfo(f'  Region-aware pruning: {n_before:,} → {n_after:,} ({100*(1-n_after/n_before):.1f}% removed)')
 
+    def latitude_band_pruning(self, keep_ratio: float, lat_band_low: float = 30.0, lat_band_high: float = 60.0) -> None:
+        """360° equirectangular 特有の緯度バイアスを補正したプルーニング。
+
+        Equirectangular では極付近ほど多くのピクセルが割り当てられるため、
+        極付近の Gaussian は Opacity が過剰に高くなりやすい。
+        緯度帯内で z-score 正規化することでこのバイアスを除去し、
+        グローバル top-K で公平に選別する。
+
+        領域定義（Y軸 = 上方向）:
+          Near-equatorial : |θ| < lat_band_low   （赤道付近、Opacity 低め）
+          Mid-latitude    : lat_band_low ≤ |θ| < lat_band_high
+          Near-polar      : |θ| ≥ lat_band_high  （極付近、Opacity 過大）
+        """
+        pos = self._positions.detach()
+        n_before = pos.shape[0]
+
+        # 仰角計算（シーン重心基準、Y軸 = 上）
+        scene_center = pos.mean(dim=0)
+        delta = pos - scene_center
+        dist_xz = torch.norm(delta[:, [0, 2]], dim=1).clamp(min=1e-6)
+        theta_deg = torch.rad2deg(torch.atan2(delta[:, 1].abs(), dist_xz))  # [0, 90]
+
+        near_eq  = theta_deg < lat_band_low
+        mid_lat  = (theta_deg >= lat_band_low) & (theta_deg < lat_band_high)
+        near_pol = theta_deg >= lat_band_high
+
+        opacities = self.get_opacities.squeeze().detach()
+
+        # 緯度帯内 z-score 正規化
+        normalized = torch.zeros_like(opacities)
+        for mask, label in [(near_eq, 'Near-equatorial'), (mid_lat, 'Mid-latitude'), (near_pol, 'Near-polar')]:
+            n_band = mask.sum().item()
+            if n_band < 2:
+                normalized[mask] = opacities[mask]
+                continue
+            s = opacities[mask]
+            normalized[mask] = (s - s.mean()) / (s.std() + 1e-8)
+            Logger.logInfo(f'    {label}: n={n_band:,}, opacity mean={s.mean():.4f}, std={s.std():.4f}')
+
+        # グローバル top-K（argsort で厳密に n_keep 個を保持）
+        n_keep = max(1, int(n_before * keep_ratio))
+        sorted_indices = torch.argsort(normalized, descending=True)
+        prune_mask = torch.ones(n_before, dtype=torch.bool, device=normalized.device)
+        prune_mask[sorted_indices[:n_keep]] = False
+
+        self.prune_points(prune_mask)
+        if self.use_3d_filter:
+            self.filter_3D = self.filter_3D[~prune_mask].contiguous()
+        torch.cuda.empty_cache()
+        n_after = self._positions.shape[0]
+        Logger.logInfo(f'  Latitude-band pruning: {n_before:,} → {n_after:,} ({100*(1-n_after/n_before):.1f}% removed)')
+
     def opacity_pruning(self, keep_ratio: float) -> None:
         """Uniformly prune by opacity: keep top keep_ratio fraction."""
         n_before = self._positions.shape[0]

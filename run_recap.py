@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
-"""実験V2：オリジナルSPaGSハイパーパラメータ + cam_spherical アブレーション
+"""RECAP実験: REgion-Corrected Adaptive Pruning
 
-変更点（オリジナルSPaGS寄せ）:
-  DENSIFY_GRAD_THRESHOLD : 0.00005 → 0.0002
-  DENSIFY_START_ITERATION: 200    → 500
+3つの実験条件:
+  recap_spags   : プルーニングなし（オリジナルSPaGS相当）
+  recap_opacity : 従来のOpacityプルーニング（ベースライン）
+  recap          : 提案手法（緯度帯正規化プルーニング）
 
-追加実験:
-  proposed_camcos: cos補正をフレームループ内でカメラ相対方向から計算
+オリジナルSPaGSハイパーパラメータを使用:
+  DENSIFY_GRAD_THRESHOLD : 0.0002
+  DENSIFY_START_ITERATION: 500
 """
 
 import subprocess, yaml, tempfile, os, time
@@ -18,56 +20,37 @@ SCENES = [
     'pavilion_midday_pond', 'restroom', 'LOU',
 ]
 
-# オリジナルHP共通上書き
 ORIG_HP = {
     'DENSIFY_GRAD_THRESHOLD':  0.0002,
     'DENSIFY_START_ITERATION': 500,
 }
 
 METHODS = {
-    # ── オリジナルHP版ベースライン ──
-    'v2_spags': {
+    # ── プルーニングなし（オリジナルSPaGS相当）──
+    'recap_spags': {
         **ORIG_HP,
         'USE_WS_LOSS':              False,
         'USE_CONTRIBUTION_PRUNING': False,
-        'USE_OPACITY_BASELINE':     False,
-        'USE_REGION_NORMALIZED':    False,
         'SA_OPACITY_PRUNING':       False,
         'USE_LAT_DENSIFY_CORRECTION': False,
-        'EXPERIMENT_TAG':           'v2_spags',
+        'EXPERIMENT_TAG':           'recap_spags',
+        'WANDB_GROUP':              'recap_spags',
     },
-    'v2_baseline': {
-        **ORIG_HP,
-        'USE_CONTRIBUTION_PRUNING': False,
-        'USE_OPACITY_BASELINE':     False,
-        'USE_REGION_NORMALIZED':    False,
-        'USE_ERROR_WEIGHT':         False,
-        'SA_OPACITY_PRUNING':       False,
-        'USE_LAT_DENSIFY_CORRECTION': False,
-        'EXPERIMENT_TAG':           'v2_baseline',
-    },
-    'v2_opacity': {
+    # ── 従来手法: Opacityプルーニング ──
+    'recap_opacity': {
         **ORIG_HP,
         'USE_CONTRIBUTION_PRUNING': True,
         'USE_OPACITY_BASELINE':     True,
+        'OPACITY_BASELINE_KEEP_RATIO': 0.690,
+        'USE_LATITUDE_PRUNING':     False,
         'USE_REGION_NORMALIZED':    False,
-        'USE_ERROR_WEIGHT':         False,
         'SA_OPACITY_PRUNING':       False,
-        'EXPERIMENT_TAG':           'v2_opacity',
+        'USE_LAT_DENSIFY_CORRECTION': False,
+        'EXPERIMENT_TAG':           'recap_opacity',
+        'WANDB_GROUP':              'recap_opacity',
     },
-    'v2_proposed': {
-        **ORIG_HP,
-        'USE_CONTRIBUTION_PRUNING':        True,
-        'USE_OPACITY_BASELINE':            False,
-        'USE_REGION_NORMALIZED':           True,
-        'CONTRIBUTION_PRUNING_USE_VOLUME': False,
-        'USE_ERROR_WEIGHT':                False,
-        'SA_OPACITY_PRUNING':              True,
-        'USE_LAT_DENSIFY_CORRECTION':      False,
-        'EXPERIMENT_TAG':                  'v2_proposed',
-    },
-    # ── V3提案手法: 緯度帯正規化プルーニング ──
-    'v3_proposed': {
+    # ── 提案手法: 緯度帯正規化プルーニング（RECAP）──
+    'recap': {
         **ORIG_HP,
         'USE_CONTRIBUTION_PRUNING': True,
         'USE_LATITUDE_PRUNING':     True,
@@ -78,26 +61,14 @@ METHODS = {
         'USE_REGION_NORMALIZED':    False,
         'SA_OPACITY_PRUNING':       False,
         'USE_LAT_DENSIFY_CORRECTION': False,
-        'EXPERIMENT_TAG':           'v3_proposed',
-    },
-    # ── cam_spherical アブレーション（現行HPで実施）──
-    'proposed_camcos': {
-        'USE_CONTRIBUTION_PRUNING':           True,
-        'USE_OPACITY_BASELINE':               False,
-        'USE_REGION_NORMALIZED':              True,
-        'CONTRIBUTION_PRUNING_USE_VOLUME':    False,
-        'CONTRIBUTION_PRUNING_USE_SPHERICAL': False,   # グローバルcos OFF
-        'CONTRIBUTION_PRUNING_USE_CAM_SPHERICAL': True, # フレーム内カメラ相対cos ON
-        'USE_ERROR_WEIGHT':                   False,
-        'SA_OPACITY_PRUNING':                 True,
-        'USE_LAT_DENSIFY_CORRECTION':         False,
-        'EXPERIMENT_TAG':                     'proposed_camcos',
+        'EXPERIMENT_TAG':           'recap',
+        'WANDB_GROUP':              'recap',
     },
 }
 
-WANDB_PROJECT = 'OmniPrune'
-RUN_SCENES  = SCENES
-RUN_METHODS = ['v2_spags', 'v2_baseline', 'v2_opacity', 'v2_proposed']
+WANDB_PROJECT = 'RECAP'
+RUN_SCENES    = SCENES
+RUN_METHODS   = ['recap_spags', 'recap_opacity', 'recap']
 
 
 def find_completed(scene, method):
@@ -116,10 +87,14 @@ def run(scene, method, skip_completed=True):
     with open(f'configs/{scene}.yaml') as f:
         config = yaml.safe_load(f)
 
+    cfg = METHODS[method]
     config['TRAINING']['WANDB']['ACTIVATE'] = True
     config['TRAINING']['WANDB']['PROJECT']  = WANDB_PROJECT
+    config['TRAINING']['WANDB']['GROUP']    = cfg.get('WANDB_GROUP', method)
     config['TRAINING']['MODEL_NAME']        = f'{scene}_{method}'
-    for k, v in METHODS[method].items():
+    for k, v in cfg.items():
+        if k == 'WANDB_GROUP':
+            continue
         config['TRAINING'][k] = v
 
     with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
@@ -143,7 +118,9 @@ def main():
     queue = [(s, m) for s in RUN_SCENES for m in RUN_METHODS]
     total, done, failed = len(queue), 0, []
     t_start = time.time()
-    print(f'V2実験: {total} runs ({len(RUN_SCENES)} scenes × {len(RUN_METHODS)} methods)')
+    print(f'RECAP実験: {total} runs ({len(RUN_SCENES)} scenes × {len(RUN_METHODS)} methods)')
+    print(f'  WandB project: {WANDB_PROJECT}')
+    print(f'  Methods: {RUN_METHODS}')
 
     for scene, method in queue:
         ok = run(scene, method)

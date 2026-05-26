@@ -46,6 +46,7 @@ from Optim.Losses.Base import BaseLoss
         ACTIVATE=False,
         ENTITY=None,
         PROJECT='nerficg',
+        GROUP=None,
         LOG_IMAGES=True,
         INDEX_VALIDATION=-1,
         INDEX_TRAINING=-1,
@@ -69,7 +70,7 @@ class BaseTrainer(Framework.Configurable, torch.nn.Module):
         self.model.git_commit = getGitCommit()
         # setup training logging
         if self.WANDB.ACTIVATE:
-            self.WANDB.ACTIVATE = Framework.setupWandb(project=self.WANDB.PROJECT, entity=self.WANDB.ENTITY, name=self.model.model_name)
+            self.WANDB.ACTIVATE = Framework.setupWandb(project=self.WANDB.PROJECT, entity=self.WANDB.ENTITY, name=self.model.model_name, group=self.WANDB.GROUP)
         # create output and checkpoint directory
         self.output_directory = model.output_directory
         self.checkpoint_directory = self.output_directory / 'checkpoints'

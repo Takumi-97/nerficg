@@ -66,6 +66,10 @@ from Optim.Samplers.DatasetSamplers import DatasetSampler
     USE_ERROR_WEIGHT=True,      # 高誤差領域の Gaussian を低スコアにしてプルーニング優先度を上げる
     ERROR_WEIGHT_LAMBDA=2.0,    # exp(-λ·error_norm) の強度。大きいほどエラー領域を積極的に削除
     # ── プルーニング戦略の切り替え（どれか1つ有効にする）───────────────
+    USE_LATITUDE_PRUNING=False,       # 提案手法: 緯度帯内 z-score 正規化 → グローバル top-K（極バイアス補正）
+    LATITUDE_PRUNING_KEEP_RATIO=0.690,
+    LATITUDE_BAND_LOW_DEG=30.0,      # Near-equatorial / Mid-latitude の境界（度）
+    LATITUDE_BAND_HIGH_DEG=60.0,     # Mid-latitude / Near-polar の境界（度）
     USE_OPACITY_BASELINE=False,      # ベースライン比較用: opacity 閾値による一様プルーニング
     OPACITY_BASELINE_KEEP_RATIO=0.690,
     USE_OPACITY_SCORE=False,         # ハイブリッド: opacity をスコアとして region-aware に使う（研究用）
@@ -594,6 +598,28 @@ class SPaGSTrainer(GuiTrainer):
             save_path = str(self.output_directory / f'positions_pre_pruning_{iteration}.npy')
             np.save(save_path, pos_np)
             Logger.logInfo(f'  [SAVE] Pre-pruning positions → {save_path} (N={len(pos_np):,})')
+
+        # ── 提案手法: 緯度帯内 z-score 正規化 → グローバル top-K ──
+        if self.USE_LATITUDE_PRUNING:
+            Logger.logInfo(f'[iter {iteration}] Latitude-band pruning (keep={self.LATITUDE_PRUNING_KEEP_RATIO:.3f})...')
+            self.model.gaussians.latitude_band_pruning(
+                keep_ratio=self.LATITUDE_PRUNING_KEEP_RATIO,
+                lat_band_low=self.LATITUDE_BAND_LOW_DEG,
+                lat_band_high=self.LATITUDE_BAND_HIGH_DEG,
+            )
+            n_after = self.model.gaussians.get_positions.shape[0]
+            self._log_pruning_event(iteration, "latitude_band_pruning", n_before, n_after)
+            if self.USE_3D_FILTER:
+                self.model.gaussians.compute_3d_filter(dataset.train())
+            self.model.gaussians.reset_opacities(max_opacity=self.OPACITY_RESET_MAX_OPACITY)
+            Logger.logInfo(f'  Post-pruning opacity reset (max={self.OPACITY_RESET_MAX_OPACITY})')
+            if iteration <= self.DENSIFY_END_ITERATION:
+                self.model.gaussians.reset_densification_info()
+            reset_lr = (self.LEARNING_RATE_POSITION_INIT
+                        * self.model.gaussians.training_cameras_extent
+                        * self.PRUNING_LR_RESET_FACTOR)
+            self.model.gaussians.set_post_pruning_lr(reset_lr, iteration, self.PRUNING_LR_RESET_STEPS)
+            return
 
         # ── ベースライン: opacityベース一様プルーニング ──
         if self.USE_OPACITY_BASELINE:

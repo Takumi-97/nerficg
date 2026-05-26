@@ -278,7 +278,7 @@ def setupTorch() -> None:
     return
 
 
-def setupWandb(project: str, entity: str, name: str) -> bool:
+def setupWandb(project: str, entity: str, name: str, group: str = None) -> bool:
     """Sets up wandb for training visualization."""
     try:
         global wandb
@@ -288,7 +288,7 @@ def setupWandb(project: str, entity: str, name: str) -> bool:
         os.environ["WANDB_SILENT"] = "true"
         log_path = Path(__file__).resolve().parents[1] / 'output'
         log_path.mkdir(parents=True, exist_ok=True)
-        wandb.init(project=project, entity=entity, name=name, config=config.toDict(),
+        wandb.init(project=project, entity=entity, name=name, group=group, config=config.toDict(),
                    dir=str(log_path))
         Logger.logInfo(f'wandb logs will be available at: {wandb.run.url}')
     except ModuleNotFoundError:
